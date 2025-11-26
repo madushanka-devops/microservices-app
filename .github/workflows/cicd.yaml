@@ -6,26 +6,20 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  # Based on your file, your username is madushanka-devops
-  IMAGE_OWNER: madushanka-devops 
+  IMAGE_OWNER: madushanka-devops
 
 jobs:
-  build-and-push:
+  # JOB 1: Calculate Version (Runs once)
+  get-version:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     outputs:
       new_version: ${{ steps.versioning.outputs.version }}
-
     steps:
       - name: Checkout App Repo
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      # 1. GENERATE SEMANTIC VERSION
       - name: Calculate Semantic Version
         id: versioning
         uses: paulhatch/semantic-version@v5.4.0
@@ -36,6 +30,26 @@ jobs:
           version_format: "${major}.${minor}.${patch}"
           user_format_type: "csv"
 
+  # JOB 2: Build & Push (Runs in parallel for each microservice)
+  build-and-push:
+    needs: get-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - folder: product-service
+            image_name: microservices-product
+          - folder: cart-service
+            image_name: microservices-cart
+          - folder: frontend
+            image_name: microservices-frontend
+    steps:
+      - name: Checkout App Repo
+        uses: actions/checkout@v3
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v2
         with:
@@ -43,34 +57,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2. BUILD AND PUSH (Matrix Strategy)
-      # This maps your folder names to the image names found in your deploy-all.yaml
       - name: Build and Push Docker Images
         uses: docker/build-push-action@v4
         with:
           context: ./${{ matrix.folder }}
           push: true
+          # Note: We use the version output from the 'get-version' job
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:${{ steps.versioning.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:${{ needs.get-version.outputs.new_version }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:latest
-        strategy:
-          matrix:
-            include:
-              - folder: product-service
-                image_name: microservices-product
-              - folder: cart-service
-                image_name: microservices-cart
-              - folder: frontend
-                image_name: microservices-frontend
 
+  # JOB 3: Update Manifests (Runs after builds are done)
   update-manifests:
-    needs: build-and-push
+    needs: [get-version, build-and-push]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Infra Repo
         uses: actions/checkout@v3
         with:
-          # REPLACE with your actual GitHub username for the infra repo
           repository: madushanka-devops/microservices-infra
           token: ${{ secrets.INFRA_REPO_PAT }}
           path: infra-repo
@@ -78,33 +82,20 @@ jobs:
       - name: Install yq
         run: sudo snap install yq
 
-      # 3. UPDATE KUBERNETES MANIFESTS
-      - name: Update deploy-all.yaml
+      - name: Update Kubernetes Manifests
         run: |
-          NEW_TAG=${{ needs.build-and-push.outputs.new_version }}
+          NEW_TAG=${{ needs.get-version.outputs.new_version }}
           REGISTRY_ROOT=${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}
           
           echo "Updating manifests to version $NEW_TAG"
 
-          # Loop through environments
           for env in dev staging production; do
              FILE="infra-repo/$env/deploy-all.yaml"
-             
              if [ -f "$FILE" ]; then
                 echo "Updating $FILE..."
-                
-                # Update Product Service
-                # We use select() to find the specific Deployment by name
                 yq -i "select(.kind == \"Deployment\" and .metadata.name == \"product-service\").spec.template.spec.containers[0].image = \"$REGISTRY_ROOT/microservices-product:$NEW_TAG\"" $FILE
-                
-                # Update Cart Service
                 yq -i "select(.kind == \"Deployment\" and .metadata.name == \"cart-service\").spec.template.spec.containers[0].image = \"$REGISTRY_ROOT/microservices-cart:$NEW_TAG\"" $FILE
-                
-                # Update Frontend
                 yq -i "select(.kind == \"Deployment\" and .metadata.name == \"frontend\").spec.template.spec.containers[0].image = \"$REGISTRY_ROOT/microservices-frontend:$NEW_TAG\"" $FILE
-                
-             else
-                echo "Warning: $FILE not found, skipping."
              fi
           done
 
@@ -114,5 +105,5 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add .
-          git commit -m "Update image versions to $NEW_TAG"
+          git commit -m "Update image versions to ${{ needs.get-version.outputs.new_version }}"
           git push
