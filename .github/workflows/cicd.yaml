@@ -9,7 +9,7 @@ env:
   IMAGE_OWNER: madushanka-devops
 
 jobs:
-  # JOB 1: Calculate Version (Runs once)
+  # JOB 1: Calculate Version
   get-version:
     runs-on: ubuntu-latest
     outputs:
@@ -24,13 +24,16 @@ jobs:
         id: versioning
         uses: paulhatch/semantic-version@v5.4.0
         with:
+          # CRITICAL FIX: Increments version on every commit so ArgoCD sees changes
+          bump_each_commit: true
+          
           tag_prefix: "v"
           major_pattern: "(MAJOR)"
           minor_pattern: "(MINOR)"
           version_format: "${major}.${minor}.${patch}"
           user_format_type: "csv"
 
-  # JOB 2: Build & Push (Runs in parallel for each microservice)
+  # JOB 2: Build & Push (Runs in parallel)
   build-and-push:
     needs: get-version
     runs-on: ubuntu-latest
@@ -62,12 +65,11 @@ jobs:
         with:
           context: ./${{ matrix.folder }}
           push: true
-          # Uses the version calculated in Job 1
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:${{ needs.get-version.outputs.new_version }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:latest
 
-  # JOB 3: Update Manifests (Runs after builds are done)
+  # JOB 3: Update Manifests
   update-manifests:
     needs: [get-version, build-and-push]
     runs-on: ubuntu-latest
@@ -89,13 +91,19 @@ jobs:
           
           echo "Updating manifests to version $NEW_TAG"
 
-          # Updates Dev, Staging, and Production folders
+          # Loop through environments (dev, staging, production)
           for env in dev staging production; do
              FILE="infra-repo/$env/deploy-all.yaml"
              if [ -f "$FILE" ]; then
                 echo "Updating $FILE..."
+                
+                # Update Product Service
                 yq -i "select(.kind == \"Deployment\" and .metadata.name == \"product-service\").spec.template.spec.containers[0].image = \"$REGISTRY_ROOT/microservices-product:$NEW_TAG\"" $FILE
+                
+                # Update Cart Service
                 yq -i "select(.kind == \"Deployment\" and .metadata.name == \"cart-service\").spec.template.spec.containers[0].image = \"$REGISTRY_ROOT/microservices-cart:$NEW_TAG\"" $FILE
+                
+                # Update Frontend
                 yq -i "select(.kind == \"Deployment\" and .metadata.name == \"frontend\").spec.template.spec.containers[0].image = \"$REGISTRY_ROOT/microservices-frontend:$NEW_TAG\"" $FILE
              fi
           done
@@ -106,7 +114,7 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           
-          # Only commit if file actually changed
+          # Smart Commit: Only commit if there are actual changes
           if [[ -n $(git status -s) ]]; then
             echo "Changes detected. Committing..."
             git add .
