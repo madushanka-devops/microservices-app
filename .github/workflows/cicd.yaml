@@ -62,7 +62,7 @@ jobs:
         with:
           context: ./${{ matrix.folder }}
           push: true
-          # Note: We use the version output from the 'get-version' job
+          # Uses the version calculated in Job 1
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:${{ needs.get-version.outputs.new_version }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:latest
@@ -89,6 +89,7 @@ jobs:
           
           echo "Updating manifests to version $NEW_TAG"
 
+          # Updates Dev, Staging, and Production folders
           for env in dev staging production; do
              FILE="infra-repo/$env/deploy-all.yaml"
              if [ -f "$FILE" ]; then
@@ -104,6 +105,13 @@ jobs:
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add .
-          git commit -m "Update image versions to ${{ needs.get-version.outputs.new_version }}"
-          git push
+          
+          # Only commit if file actually changed
+          if [[ -n $(git status -s) ]]; then
+            echo "Changes detected. Committing..."
+            git add .
+            git commit -m "Update image versions to ${{ needs.get-version.outputs.new_version }}"
+            git push
+          else
+            echo "No changes detected. Skipping commit."
+          fi
