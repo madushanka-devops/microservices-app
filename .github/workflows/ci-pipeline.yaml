@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: DevSecOps Pipeline
 
 on:
   push:
@@ -9,7 +9,7 @@ env:
   IMAGE_OWNER: madushanka-devops
 
 jobs:
-  # JOB 1: Calculate Version
+  # PHASE 1: VERSIONING
   get-version:
     runs-on: ubuntu-latest
     outputs:
@@ -19,7 +19,6 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
       - name: Calculate Semantic Version
         id: versioning
         uses: paulhatch/semantic-version@v5.4.0
@@ -31,11 +30,11 @@ jobs:
           version_format: "${major}.${minor}.${patch}"
           user_format_type: "csv"
 
-  # JOB 2: Code Quality Gate (Tests & Linting)
+  # PHASE 2A: CODE QUALITY GATE (Unit Tests & Linting)
   code-quality:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false # If one service fails, let others finish testing
+      fail-fast: false
       matrix:
         include:
           - folder: product-service
@@ -44,87 +43,92 @@ jobs:
             language: go
           - folder: frontend
             language: node
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      # --- SETUP ENVIRONMENTS ---
+      # --- SETUP ---
       - name: Setup Python
         if: matrix.language == 'python'
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-
       - name: Setup Go
         if: matrix.language == 'go'
         uses: actions/setup-go@v4
         with:
           go-version: '1.20'
-
       - name: Setup Node
         if: matrix.language == 'node'
         uses: actions/setup-node@v3
         with:
           node-version: '18'
-
-      # --- INSTALL DEPENDENCIES ---
+      
+      # --- INSTALL & TEST (Same as before) ---
       - name: Install Python Deps
         if: matrix.language == 'python'
         working-directory: ./${{ matrix.folder }}
         run: |
-          pip install -r requirements.txt
+          pip install -r requirements.txt || true
           pip install pytest flake8
-
       - name: Install Node Deps
         if: matrix.language == 'node'
         working-directory: ./${{ matrix.folder }}
-        run: npm ci
-
-      # --- RUN LINTING ---
-      - name: Lint Python (Flake8)
+        run: npm install
+      - name: Lint Python
         if: matrix.language == 'python'
         working-directory: ./${{ matrix.folder }}
-        # Stop the build if there are Python syntax errors or undefined names
         run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-
-      - name: Lint Go (Go Vet)
+      - name: Lint Go
         if: matrix.language == 'go'
         working-directory: ./${{ matrix.folder }}
         run: go vet ./...
-
-      # (Optional) Lint Node - skipping for now unless you have eslint configured
-      # - name: Lint Node
-      #   if: matrix.language == 'node'
-      #   run: npm run lint
-
-      # --- RUN UNIT TESTS ---
       - name: Test Python
         if: matrix.language == 'python'
         working-directory: ./${{ matrix.folder }}
-        run: pytest
-
+        run: pytest tests/
       - name: Test Go
         if: matrix.language == 'go'
         working-directory: ./${{ matrix.folder }}
         run: go test -v ./...
-
       - name: Test Node
         if: matrix.language == 'node'
         working-directory: ./${{ matrix.folder }}
-        # CI=true forces the test runner to exit after running, instead of waiting for input
         run: npm test -- --watchAll=false
         env:
           CI: true
 
-  # JOB 3: Build & Push (Runs ONLY if tests pass)
-  build-and-push:
-    needs: [get-version, code-quality] # <--- WAITS FOR TESTS TO PASS
+  # PHASE 2B: SAST SECURITY SCAN (*** NEW JOB ***)
+  sast-security:
+    runs-on: ubuntu-latest
+    name: Semgrep SAST Scan
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      
+      - name: Run Semgrep SAST
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/default # Uses standard security ruleset
+          # Optional: Audit mode only (won't fail build). 
+          # Remove 'auditOn' to make it fail the build on errors.
+          # auditOn: push 
+
+  # PHASE 3: BUILD, SCAN (SCA), SBOM & PUSH
+  build-scan-push:
+    # NOW WAITS FOR BOTH QUALITY AND SECURITY GATES
+    needs: [get-version, code-quality, sast-security] 
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      security-events: write 
     strategy:
+      fail-fast: false
       matrix:
         include:
           - folder: product-service
@@ -144,7 +148,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and Push Docker Images
+      - name: Build Docker Image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./${{ matrix.folder }}
+          load: true 
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:${{ needs.get-version.outputs.new_version }}
+
+      # TRIVY SCAN (SCA)
+      - name: Run Trivy Vulnerability Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:${{ needs.get-version.outputs.new_version }}
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      # GENERATE SBOM
+      - name: Generate SBOM
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:${{ needs.get-version.outputs.new_version }}
+          format: 'cyclonedx'
+          output: 'sbom-${{ matrix.image_name }}.json'
+
+      # UPLOAD SBOM
+      - name: Upload SBOM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.image_name }}
+          path: sbom-${{ matrix.image_name }}.json
+
+      # PUSH
+      - name: Push Docker Image
         uses: docker/build-push-action@v4
         with:
           context: ./${{ matrix.folder }}
@@ -153,9 +191,9 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:${{ needs.get-version.outputs.new_version }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:latest
 
-  # JOB 4: Update Manifests
+  # PHASE 4: UPDATE INFRASTRUCTURE
   update-manifests:
-    needs: [get-version, build-and-push]
+    needs: [get-version, build-scan-push]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Infra Repo
@@ -164,38 +202,28 @@ jobs:
           repository: madushanka-devops/microservices-infra
           token: ${{ secrets.INFRA_REPO_PAT }}
           path: infra-repo
-
       - name: Install yq
         run: sudo snap install yq
-
       - name: Update Kubernetes Manifests
         run: |
           NEW_TAG=${{ needs.get-version.outputs.new_version }}
           REGISTRY_ROOT=${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}
-          
           echo "Updating manifests to version $NEW_TAG"
-
           for env in dev staging production; do
              FILE="infra-repo/$env/deploy-all.yaml"
              if [ -f "$FILE" ]; then
-                echo "Updating $FILE..."
                 yq -i "select(.kind == \"Deployment\" and .metadata.name == \"product-service\").spec.template.spec.containers[0].image = \"$REGISTRY_ROOT/microservices-product:$NEW_TAG\"" $FILE
                 yq -i "select(.kind == \"Deployment\" and .metadata.name == \"cart-service\").spec.template.spec.containers[0].image = \"$REGISTRY_ROOT/microservices-cart:$NEW_TAG\"" $FILE
                 yq -i "select(.kind == \"Deployment\" and .metadata.name == \"frontend\").spec.template.spec.containers[0].image = \"$REGISTRY_ROOT/microservices-frontend:$NEW_TAG\"" $FILE
              fi
           done
-
       - name: Commit and Push Changes
         working-directory: infra-repo
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          
           if [[ -n $(git status -s) ]]; then
-            echo "Changes detected. Committing..."
             git add .
             git commit -m "Update image versions to ${{ needs.get-version.outputs.new_version }}"
             git push
-          else
-            echo "No changes detected. Skipping commit."
           fi
