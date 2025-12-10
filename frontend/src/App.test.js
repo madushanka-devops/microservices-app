@@ -1,1 +1,3 @@
-test('renders learn react link', () => {});
+test('dummy test that always passes', () => {
+  expect(1 + 1).toBe(2);
+});
