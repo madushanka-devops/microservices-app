@@ -43,7 +43,7 @@
     ]
   },
   "overrides": {
-    "glob": "^10.5.0",
+    "glob": "latest",
     "nth-check": "^2.0.1"
   }
 }
