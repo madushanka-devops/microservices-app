@@ -3,9 +3,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
+# SECURITY FIX: Define explicitly trusted domains
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+    "http://dev.microstore.local",
+    "http://staging.microstore.local",
+    "http://production.microstore.local"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins, # <--- CHANGED from ["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )
