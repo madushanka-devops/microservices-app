@@ -32,7 +32,7 @@ function App() {
   return (
     <div className="App">
       <nav className="navbar">
-        <h1>MicroStore 🚀 v1.0 - Welcome to the Microstore!</h1>
+        <h1>MicroStore 🚀 - Version 2.0 (Live Demo)</h1>
       </nav>
 
       <div className="container">
