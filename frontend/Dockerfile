@@ -16,9 +16,11 @@ RUN rm -rf ./*
 # Copy static assets from builder stage
 COPY --from=builder /app/build .
 
-# FIX: Grant ownership to the nginx user
-# This ensures the worker process can actually read the files
-RUN chown -R nginx:nginx /usr/share/nginx/html && chmod -R 755 /usr/share/nginx/html
+# FIX: Proper permissions (Dirs=755, Files=644)
+# We also ensure the 'nginx' user owns the directory root
+RUN chown -R nginx:nginx /usr/share/nginx/html && \
+    find /usr/share/nginx/html -type d -exec chmod 755 {} \; && \
+    find /usr/share/nginx/html -type f -exec chmod 644 {} \;
 
 # Copy our custom config (to listen on port 3000)
 COPY nginx.conf /etc/nginx/conf.d/default.conf
