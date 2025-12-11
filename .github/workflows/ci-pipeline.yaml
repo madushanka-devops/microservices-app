@@ -193,6 +193,21 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:${{ needs.get-version.outputs.new_version }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:latest
 
+      # --- NEW STEP: INSTALL COSIGN ---
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.5.0
+
+      # --- NEW STEP: SIGN IMAGE ---
+      - name: Sign Docker Image
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:${{ needs.get-version.outputs.new_version }}
+
+            
+
   # PHASE 4: UPDATE INFRASTRUCTURE
   update-manifests:
     needs: [get-version, build-scan-push]
