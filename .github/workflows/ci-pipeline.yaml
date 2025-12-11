@@ -165,7 +165,7 @@ jobs:
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
-          trivyignores: .trivyignore  # <--- THIS IS THE FIX
+          trivyignores: .trivyignore
 
 
       # GENERATE SBOM
