@@ -220,7 +220,7 @@ jobs:
           token: ${{ secrets.INFRA_REPO_PAT }}
           path: infra-repo
 
-      # --- NEW STEP: Run Checkov IaC Scanner ---
+      # --- SCAN IaC AND SAVE REPORT ---
       - name: Run Checkov on Infrastructure
         uses: bridgecrewio/checkov-action@master
         with:
@@ -228,6 +228,16 @@ jobs:
           framework: kubernetes
           # Soft Fail: Report errors but don't block build (yet)
           soft_fail: true
+          output_format: cli
+          # Output to file so we can download it
+          output_file_path: checkov_report.txt
+
+      - name: Upload Checkov Report
+        if: always() # Ensure upload happens even if we decide to block failures later
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-iac-report
+          path: checkov_report.txt
 
 
 
