@@ -17,7 +17,7 @@ RUN rm -rf ./*
 COPY --from=builder /app/build .
 
 # Copy our custom config (to listen on port 3000)
-COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Expose port 3000
 EXPOSE 3000
