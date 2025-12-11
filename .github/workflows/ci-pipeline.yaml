@@ -155,7 +155,7 @@ jobs:
           load: true 
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image_name }}:${{ needs.get-version.outputs.new_version }}
 
-      # TRIVY SCAN (SCA)
+      # TRIVY SCAN (Updated to use Ignore File)
       - name: Run Trivy Vulnerability Scanner
         uses: aquasecurity/trivy-action@master
         with:
@@ -165,6 +165,8 @@ jobs:
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
+          trivyignores: .trivyignore  # <--- THIS IS THE FIX
+
 
       # GENERATE SBOM
       - name: Generate SBOM
