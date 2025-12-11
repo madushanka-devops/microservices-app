@@ -1,3 +1,2 @@
-# Acceptance Reason: The 'glob' vulnerability is in a build tool 
-# dependency. We are accepting this risk to restore service availability.
-CVE-2025-64756
+# Accepting nth-check vulnerability (Dev dependency issue)
+CVE-2021-3803
