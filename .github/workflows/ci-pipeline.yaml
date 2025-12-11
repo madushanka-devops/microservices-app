@@ -208,7 +208,7 @@ jobs:
 
             
 
-  # PHASE 4: UPDATE INFRASTRUCTURE
+  # PHASE 4: UPDATE INFRASTRUCTURE & SCAN IaC (*** UPDATED ***)
   update-manifests:
     needs: [get-version, build-scan-push]
     runs-on: ubuntu-latest
@@ -219,6 +219,18 @@ jobs:
           repository: madushanka-devops/microservices-infra
           token: ${{ secrets.INFRA_REPO_PAT }}
           path: infra-repo
+
+      # --- NEW STEP: Run Checkov IaC Scanner ---
+      - name: Run Checkov on Infrastructure
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: infra-repo
+          framework: kubernetes
+          # Soft Fail: Report errors but don't block build (yet)
+          soft_fail: true
+
+
+
       - name: Install yq
         run: sudo snap install yq
       - name: Update Kubernetes Manifests
