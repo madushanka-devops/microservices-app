@@ -10,19 +10,21 @@ RUN npm run build
 FROM nginx:alpine
 WORKDIR /usr/share/nginx/html
 
+# FORCE FIX: Switch Nginx to run as 'root' user in the main config
+# This bypasses all permission issues with the mounted files.
+RUN sed -i 's/user  nginx;/user  root;/g' /etc/nginx/nginx.conf
+
 # Remove default assets
 RUN rm -rf ./*
 
 # Copy assets
 COPY --from=builder /app/build .
 
-# FIX: Grant Read Permissions to EVERYONE (chmod a+r)
-# This rules out any "user mismatch" issues completely.
-RUN chmod -R a+r /usr/share/nginx/html && \
-    find /usr/share/nginx/html -type d -exec chmod a+x {} \;
-
 # Copy Config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Permissions (Just in case)
+RUN chmod -R 755 /usr/share/nginx/html
 
 EXPOSE 3000
 CMD ["nginx", "-g", "daemon off;"]
