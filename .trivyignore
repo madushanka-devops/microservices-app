@@ -1,4 +1,4 @@
 # Accepting nth-check vulnerability (Dev dependency issue)
 # Vulnerabilties that you want to ignore.
 CVE-2021-3803
-# CVE-2025-64756
+CVE-2025-64756
